@@ -4,7 +4,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-pub fn play<F: FnMut(f32) -> Option<f32> + Send + Sync>(func: &mut F) -> bool {
+pub fn play<F: FnOnce(f32) -> Vec<f32> + Send + Sync>(func: F) -> bool {
     let host = cpal::default_host();
 
     let device = host.default_output_device().unwrap();
@@ -18,19 +18,15 @@ pub fn play<F: FnMut(f32) -> Option<f32> + Send + Sync>(func: &mut F) -> bool {
     .is_some()
 }
 
-fn play_with_depth<T: cpal::Sample, F: FnMut(f32) -> Option<f32> + Send + Sync>(
-    device: &cpal::Device,
-    config: &cpal::StreamConfig,
-    func: &mut F,
-) -> Option<()> {
+fn play_with_depth<T, F>(device: &cpal::Device, config: &cpal::StreamConfig, func: F) -> Option<()>
+where
+    T: cpal::Sample,
+    F: FnOnce(f32) -> Vec<f32>,
+{
     let sample_rate = config.sample_rate.0 as f32;
     let channels = config.channels as usize;
 
-    let samples = Arc::new(Mutex::new(
-        (0..)
-            .scan((), |_, i| func(i as f32 / sample_rate))
-            .collect::<VecDeque<_>>(),
-    ));
+    let samples = Arc::new(Mutex::new(VecDeque::from(func(sample_rate))));
     let samples_shared = samples.clone();
 
     let stream = device
@@ -81,6 +77,15 @@ mod test {
                 }
             }
         }
-        assert!(play(&mut sine(440.0, 1.0)));
+
+        assert!(play(|sampling_rate| {
+            let osc = sine(440.0, 2.0);
+            (0..)
+                .scan((), |_, i| {
+                    let phase = i as f32 / sampling_rate;
+                    osc(phase)
+                })
+                .collect()
+        }));
     }
 }
