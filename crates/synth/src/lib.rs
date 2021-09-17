@@ -1,4 +1,7 @@
+pub mod waveform;
+
 use std::collections::BTreeMap;
+use waveform::Waveform;
 
 fn note_to_freq(note: i8) -> f32 {
     440.0 * 2f32.powf((note - 69) as f32 / 12.0)
@@ -7,6 +10,7 @@ fn note_to_freq(note: i8) -> f32 {
 pub struct Synth {
     notes_ringing: BTreeMap<i8, f32>,
     sampling_rate: f32,
+    waveforms: Vec<Box<dyn Waveform>>,
 }
 
 impl Synth {
@@ -14,20 +18,26 @@ impl Synth {
         Synth {
             notes_ringing: BTreeMap::new(),
             sampling_rate,
+            waveforms: Vec::new(),
         }
     }
 
     pub fn sample(&mut self) -> f32 {
-        let sampling_rate = self.sampling_rate;
-        self.notes_ringing
-            .iter_mut()
-            .map(|(&note, phase)| {
+        let sample = self
+            .notes_ringing
+            .iter()
+            .flat_map(|(&note, &phase)| {
                 let freq = note_to_freq(note);
-                *phase += 1.0 / sampling_rate * freq;
-                *phase %= 1.0;
-                f32::sin(*phase * 2.0 * std::f32::consts::PI)
+                self.waveforms
+                    .iter()
+                    .map(move |wave| wave.sample(phase, freq))
             })
-            .sum()
+            .sum();
+        for (&note, phase) in &mut self.notes_ringing {
+            let freq = note_to_freq(note);
+            *phase += 1.0 / self.sampling_rate * freq;
+        }
+        sample
     }
 
     pub fn note_on(&mut self, note: i8) {
@@ -37,12 +47,17 @@ impl Synth {
     pub fn note_off(&mut self, note: i8) {
         self.notes_ringing.remove(&note);
     }
+
+    pub fn add_waveform<T: Waveform + 'static>(&mut self, wave: T) {
+        self.waveforms.push(Box::new(wave));
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::Synth;
     use std::collections::VecDeque;
+    use std::f32::consts::PI;
 
     const A_4: i8 = 69;
 
@@ -65,12 +80,22 @@ mod tests {
         }
     }
 
+    fn fm_wave(mod_amp: f32, mod_freq_ratio: f32) -> impl Fn(f32, f32) -> f32 {
+        fn sinusoid(phase: f32) -> f32 {
+            f32::sin(2.0 * PI * phase)
+        }
+
+        move |phase, _| sinusoid(phase + mod_amp * sinusoid(phase * mod_freq_ratio))
+    }
+
     #[test]
     fn test_synth() {
         use player::play;
 
         play(|sampling_rate| {
             let mut synth = Synth::new(sampling_rate);
+            synth.add_waveform(fm_wave(2.0, 3.0));
+
             let mut events_queue = VecDeque::from(vec![
                 (0.0, Event::NoteOn(A_4)),
                 (0.2, Event::NoteOn(A_4 + 4)),
