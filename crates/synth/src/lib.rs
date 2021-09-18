@@ -1,7 +1,8 @@
+pub mod oscillator;
 pub mod waveform;
 
+use oscillator::Oscillator;
 use std::collections::BTreeMap;
-use waveform::Waveform;
 
 fn note_to_freq(note: i8) -> f32 {
     440.0 * 2f32.powf((note - 69) as f32 / 12.0)
@@ -10,7 +11,7 @@ fn note_to_freq(note: i8) -> f32 {
 pub struct Synth {
     notes_ringing: BTreeMap<i8, f32>,
     sampling_rate: f32,
-    waveforms: Vec<Box<dyn Waveform>>,
+    oscillators: Vec<Oscillator>,
 }
 
 impl Synth {
@@ -18,7 +19,7 @@ impl Synth {
         Synth {
             notes_ringing: BTreeMap::new(),
             sampling_rate,
-            waveforms: Vec::new(),
+            oscillators: Vec::new(),
         }
     }
 
@@ -28,9 +29,9 @@ impl Synth {
             .iter()
             .flat_map(|(&note, &phase)| {
                 let freq = note_to_freq(note);
-                self.waveforms
+                self.oscillators
                     .iter()
-                    .map(move |wave| wave.sample(phase, freq))
+                    .map(move |osc| osc.sample(phase, freq))
             })
             .sum();
         for (&note, phase) in &mut self.notes_ringing {
@@ -48,13 +49,14 @@ impl Synth {
         self.notes_ringing.remove(&note);
     }
 
-    pub fn add_waveform<T: Waveform + 'static>(&mut self, wave: T) {
-        self.waveforms.push(Box::new(wave));
+    pub fn push_oscillator(&mut self, oscillator: Oscillator) {
+        self.oscillators.push(oscillator);
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::oscillator::Oscillator;
     use super::Synth;
     use std::collections::VecDeque;
     use std::f32::consts::PI;
@@ -94,7 +96,7 @@ mod tests {
 
         play(|sampling_rate| {
             let mut synth = Synth::new(sampling_rate);
-            synth.add_waveform(fm_wave(2.0, 3.0));
+            synth.push_oscillator(Oscillator::new(fm_wave(2.0, 3.0)).voices(3).detune(1.01));
 
             let mut events_queue = VecDeque::from(vec![
                 (0.0, Event::NoteOn(A_4)),
