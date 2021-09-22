@@ -1,6 +1,8 @@
+pub mod envelope;
 pub mod oscillator;
 pub mod waveform;
 
+use envelope::Envelope;
 use oscillator::Oscillator;
 use std::collections::BTreeMap;
 
@@ -8,8 +10,16 @@ fn key_to_freq(key: i8) -> f32 {
     440.0 * 2f32.powf((key - 69) as f32 / 12.0)
 }
 
+#[derive(Clone, Copy, Default)]
+struct Note {
+    phase: f32,
+    elapsed: f32,
+}
+
 pub struct Synth {
-    notes_ringing: BTreeMap<i8, f32>,
+    envelope: Option<Envelope>,
+    notes_ringing: BTreeMap<i8, Note>,
+    notes_releasing: Vec<(i8, Note)>,
     sampling_rate: f32,
     oscillators: Vec<Oscillator>,
 }
@@ -17,36 +27,85 @@ pub struct Synth {
 impl Synth {
     pub fn new(sampling_rate: f32) -> Self {
         Synth {
+            envelope: None,
             notes_ringing: BTreeMap::new(),
+            notes_releasing: Vec::new(),
             sampling_rate,
             oscillators: Vec::new(),
         }
     }
 
     pub fn sample(&mut self) -> f32 {
-        let sample = self
+        let sample: f32 = self
             .notes_ringing
             .iter()
-            .flat_map(|(&key, &phase)| {
+            .flat_map(|(&key, &Note { phase, elapsed })| {
                 let freq = key_to_freq(key);
+                let multiplier = self.envelope.map(|x| x.multiplier(elapsed)).unwrap_or(1.0);
                 self.oscillators
                     .iter()
-                    .map(move |osc| osc.sample(phase, freq))
+                    .map(move |osc| osc.sample(phase, freq) * multiplier)
             })
             .sum();
-        for (&key, phase) in &mut self.notes_ringing {
-            let freq = key_to_freq(key);
+
+        let sample_releasing: f32 = self
+            .notes_releasing
+            .iter()
+            .flat_map(|&(key, Note { phase, elapsed })| {
+                let freq = key_to_freq(key);
+                let multiplier = self
+                    .envelope
+                    .and_then(|x| x.release_multiplier(elapsed))
+                    .unwrap_or(0.0);
+                self.oscillators
+                    .iter()
+                    .map(move |osc| osc.sample(phase, freq) * multiplier)
+            })
+            .sum();
+
+        for (&note, Note { phase, elapsed }) in &mut self.notes_ringing {
+            let freq = key_to_freq(note);
             *phase += 1.0 / self.sampling_rate * freq;
+            *elapsed += 1.0 / self.sampling_rate;
         }
-        sample
+
+        for (note, Note { phase, elapsed }) in &mut self.notes_releasing {
+            let freq = key_to_freq(*note);
+            *phase += 1.0 / self.sampling_rate * freq;
+            *elapsed += 1.0 / self.sampling_rate;
+        }
+
+        let envelope = self.envelope;
+
+        self.notes_releasing.retain(|&(_, note)| {
+            envelope
+                .map(|env| env.is_releasing(note.elapsed))
+                .unwrap_or(false)
+        });
+
+        sample + sample_releasing
     }
 
     pub fn note_on(&mut self, key: i8) {
-        self.notes_ringing.insert(key, 0.0);
+        self.notes_ringing.insert(key, Default::default());
     }
 
     pub fn note_off(&mut self, key: i8) {
-        self.notes_ringing.remove(&key);
+        if let Some(note) = self.notes_ringing.remove(&key) {
+            if self.envelope.is_some() {
+                self.notes_releasing.push((
+                    key,
+                    Note {
+                        elapsed: 0.0,
+                        ..note
+                    },
+                ));
+            }
+        }
+    }
+
+    pub fn set_envelope(&mut self, envelope: Option<Envelope>) {
+        self.envelope = envelope;
     }
 
     pub fn push_oscillator(&mut self, oscillator: Oscillator) {
@@ -92,11 +151,13 @@ mod tests {
 
     #[test]
     fn test_synth() {
+        use super::envelope::Envelope;
         use player::play;
 
         play(|sampling_rate| {
             let mut synth = Synth::new(sampling_rate);
             synth.push_oscillator(Oscillator::new(fm_wave(2.0, 3.0)).voices(3).detune(1.01));
+            synth.set_envelope(Some(Envelope::new(0.0, 0.1, 0.2, 0.5)));
 
             let mut events_queue = VecDeque::from(vec![
                 (0.0, Event::NoteOn(A_4)),
@@ -107,7 +168,7 @@ mod tests {
                 (1.8, Event::NoteOff(A_4 + 7)),
             ]);
 
-            (0..(sampling_rate as usize) * 2)
+            (0..(sampling_rate as usize) * 3)
                 .map(move |sample| {
                     let pos = sample as f32 / sampling_rate;
                     while let Some(&(event_at, event)) = events_queue.front() {
