@@ -4,8 +4,8 @@ pub mod waveform;
 use oscillator::Oscillator;
 use std::collections::BTreeMap;
 
-fn note_to_freq(note: i8) -> f32 {
-    440.0 * 2f32.powf((note - 69) as f32 / 12.0)
+fn key_to_freq(key: i8) -> f32 {
+    440.0 * 2f32.powf((key - 69) as f32 / 12.0)
 }
 
 pub struct Synth {
@@ -27,26 +27,26 @@ impl Synth {
         let sample = self
             .notes_ringing
             .iter()
-            .flat_map(|(&note, &phase)| {
-                let freq = note_to_freq(note);
+            .flat_map(|(&key, &phase)| {
+                let freq = key_to_freq(key);
                 self.oscillators
                     .iter()
                     .map(move |osc| osc.sample(phase, freq))
             })
             .sum();
-        for (&note, phase) in &mut self.notes_ringing {
-            let freq = note_to_freq(note);
+        for (&key, phase) in &mut self.notes_ringing {
+            let freq = key_to_freq(key);
             *phase += 1.0 / self.sampling_rate * freq;
         }
         sample
     }
 
-    pub fn note_on(&mut self, note: i8) {
-        self.notes_ringing.insert(note, 0.0);
+    pub fn note_on(&mut self, key: i8) {
+        self.notes_ringing.insert(key, 0.0);
     }
 
-    pub fn note_off(&mut self, note: i8) {
-        self.notes_ringing.remove(&note);
+    pub fn note_off(&mut self, key: i8) {
+        self.notes_ringing.remove(&key);
     }
 
     pub fn push_oscillator(&mut self, oscillator: Oscillator) {
@@ -72,11 +72,11 @@ mod tests {
     impl Event {
         fn apply_to_synth(&self, synth: &mut Synth) {
             match self {
-                Event::NoteOn(note) => {
-                    synth.note_on(*note);
+                Event::NoteOn(key) => {
+                    synth.note_on(*key);
                 }
-                Event::NoteOff(note) => {
-                    synth.note_off(*note);
+                Event::NoteOff(key) => {
+                    synth.note_off(*key);
                 }
             }
         }
@@ -125,11 +125,11 @@ mod tests {
     }
 
     #[test]
-    fn test_note_to_freq() {
-        use super::note_to_freq;
+    fn test_key_to_freq() {
+        use super::key_to_freq;
 
-        approx::assert_relative_eq!(note_to_freq(A_4), 440.0);
-        approx::assert_relative_eq!(note_to_freq(A_4 + 7), 659.255113); // E5
-        approx::assert_relative_eq!(note_to_freq(A_4 + 12), 880.0); // A5
+        approx::assert_relative_eq!(key_to_freq(A_4), 440.0);
+        approx::assert_relative_eq!(key_to_freq(A_4 + 7), 659.255113); // E5
+        approx::assert_relative_eq!(key_to_freq(A_4 + 12), 880.0); // A5
     }
 }
