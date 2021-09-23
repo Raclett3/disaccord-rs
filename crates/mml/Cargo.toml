@@ -1,0 +1,10 @@
+[package]
+name = "mml"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+synth = {path = "../synth"}
+
+[dev-dependencies]
+player = {path = "../player"}
