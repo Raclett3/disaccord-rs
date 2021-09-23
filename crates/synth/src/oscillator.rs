@@ -28,8 +28,10 @@ impl Oscillator {
         self.detune = detune;
         self
     }
+}
 
-    pub fn sample(&self, phase: f32, freq: f32) -> f32 {
+impl Waveform for Oscillator {
+    fn sample(&self, phase: f32, freq: f32) -> f32 {
         (0..self.voices)
             .map(|x| {
                 let multiplier = self.detune.powi(x as i32);

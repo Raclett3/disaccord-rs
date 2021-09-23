@@ -5,6 +5,7 @@ pub mod waveform;
 use envelope::Envelope;
 use oscillator::Oscillator;
 use std::collections::BTreeMap;
+use waveform::Waveform;
 
 fn key_to_freq(key: i8) -> f32 {
     440.0 * 2f32.powf((key - 69) as f32 / 12.0)
@@ -39,27 +40,23 @@ impl Synth {
         let sample: f32 = self
             .notes_ringing
             .iter()
-            .flat_map(|(&key, &Note { phase, elapsed })| {
+            .map(|(&key, &Note { phase, elapsed })| {
                 let freq = key_to_freq(key);
                 let multiplier = self.envelope.map(|x| x.multiplier(elapsed)).unwrap_or(1.0);
-                self.oscillators
-                    .iter()
-                    .map(move |osc| osc.sample(phase, freq) * multiplier)
+                self.oscillators.sample(phase, freq) * multiplier
             })
             .sum();
 
         let sample_releasing: f32 = self
             .notes_releasing
             .iter()
-            .flat_map(|&(key, Note { phase, elapsed })| {
+            .map(|&(key, Note { phase, elapsed })| {
                 let freq = key_to_freq(key);
                 let multiplier = self
                     .envelope
                     .and_then(|x| x.release_multiplier(elapsed))
                     .unwrap_or(0.0);
-                self.oscillators
-                    .iter()
-                    .map(move |osc| osc.sample(phase, freq) * multiplier)
+                self.oscillators.sample(phase, freq) * multiplier
             })
             .sum();
 
